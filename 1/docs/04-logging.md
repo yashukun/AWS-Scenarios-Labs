@@ -39,8 +39,25 @@ Member accounts can **see** the org trail, but they can't stop, edit or delete i
 
 ## Steps
 
+**Build in this order:** the key and the bucket in **security** first (1 and 2), then the trail in **management** (3). The trail can't be created until the key and the bucket let it in.
+
+**Before you start, fill in the placeholders** in both policy files, from the lab folder:
+```bash
+sed -e 's/<MGMT_ID>/<your mgmt id>/g' -e 's/<SECURITY_ID>/<your security id>/g' -e 's/<ORG_ID>/<your o-… id>/g' \
+  policies/logging/kms-key-policy.json > /tmp/kms-key-policy.json
+sed -e 's/<MGMT_ID>/<your mgmt id>/g' -e 's/<SECURITY_ID>/<your security id>/g' -e 's/<ORG_ID>/<your o-… id>/g' \
+  policies/logging/log-bucket-policy.json > /tmp/log-bucket-policy.json
+grep -c '<' /tmp/kms-key-policy.json /tmp/log-bucket-policy.json   # want 0 and 0: no placeholders left
+```
+
+**To get into the security account:** access portal → **security** → *AdministratorAccess*. Check that the **top-right corner shows the security account ID** and the region is **us-east-1**.
+
 ### 1 · KMS key (in `security`, us-east-1)
-KMS → Customer managed keys → **Create key**: symmetric, encrypt/decrypt, single-region, alias `cloudtrail-org`. On the key policy page, **replace** the policy with [`policies/logging/kms-key-policy.json`](../policies/logging/kms-key-policy.json) after filling in the placeholders.
+1. KMS → *Customer managed keys* → **Create key** → Symmetric, Encrypt and decrypt, default advanced options → **Next**.
+2. Alias `cloudtrail-org` → **Next** → no key administrators → **Next** → no key users → **Next** → **Finish**.
+3. Open the key → **Key policy** tab → **Edit** (click *Switch to policy view* first if you see it).
+4. Delete everything in the box, paste the contents of `/tmp/kms-key-policy.json`, and click **Save changes**.
+5. Copy the key **ARN** from *General configuration*. Steps 2 and 3 need it.
 
 | Statement | What it says |
 |---|---|
@@ -62,14 +79,22 @@ KMS → Customer managed keys → **Create key**: symmetric, encrypt/decrypt, si
 | Lifecycle | Expire after 30 days; noncurrent versions after 1 day | Keeps storage near $0 |
 | Bucket policy | [`policies/logging/log-bucket-policy.json`](../policies/logging/log-bucket-policy.json) | Only our trail may write; TLS only |
 
+Where each setting lives in the console:
+- **When you create the bucket:** name, Object Ownership (*ACLs disabled*), Block all public access, Versioning, Default encryption (*SSE-KMS* → choose `cloudtrail-org` → Bucket Key *Enable*), and *Advanced settings* → **Object Lock: Enable**. You can only turn Object Lock on at creation time.
+- **After it's created:**
+  - *Properties* → Object Lock → **Edit** → default retention Governance, 1 day
+  - *Management* → **Create lifecycle rule** → apply to all objects → expire current versions after 30 days, permanently delete noncurrent versions after 1 day
+  - *Permissions* → Bucket policy → **Edit** → paste `/tmp/log-bucket-policy.json`
+
 ### 3 · Organization trail (in `management`, us-east-1)
-CloudTrail → **Create trail**:
-- Name: `org-trail` (must match the policies)
+Switch to the **management** account in the access portal. CloudTrail → **Create trail**:
+- Name: `org-trail` (it must be exactly this, because both policies name it)
 - ✅ **Enable for all accounts in my organization**
-- Existing bucket → type the name
-- SSE-KMS → paste the key ARN
+- Storage: ◉ *Use existing S3 bucket*. **Type** the bucket name; *Browse* can't see buckets in another account.
+- Log file SSE-KMS encryption: ✅ → *Existing* key → paste the key ARN
 - ✅ Log file validation
-- ❌ CloudWatch Logs, ❌ data events, ❌ Insights
+- ❌ CloudWatch Logs
+- Next page: **Management events** only (Read + Write). ❌ data events, ❌ Insights.
 
 ## Verify
 
@@ -84,6 +109,9 @@ Logs arrive under `AWSLogs/<ORG_ID>/<ACCOUNT_ID>/CloudTrail/<region>/YYYY/MM/DD/
 ---
 
 ## 🔥 Field notes
+
+> [!WARNING]
+> **`MalformedPolicyDocumentException: The new key policy will not allow you to update the key policy in the future.`** KMS refuses any policy that would lock the person saving it out of the key. Ours hands control to `arn:aws:iam::<SECURITY_ID>:root`, so the check fails when the key was created in the **management** account by mistake. Check the account ID in the top-right corner. If it's wrong, schedule the stray key for deletion (7 days; a key pending deletion costs nothing), switch to **security**, and create the key again.
 
 > [!NOTE]
 > **"Can't fetch current bucket access policy… not updated."** When creating the trail, the console tries to add its permissions to the bucket policy. It can't read a bucket in **another account**. That's harmless, because you wrote the policy yourself.

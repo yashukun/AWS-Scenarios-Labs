@@ -22,27 +22,46 @@ The management account sits at the root, outside every OU, on purpose.
 
 - **All features** mode turns on SCPs, tag policies and the other policy types. The alternative, consolidated billing only, is just a shared bill.
 - **`OrganizationAccountAccessRole`** is created automatically in every account you *create* (not in accounts you *invite*). It trusts the management account and has admin rights, which makes it the break-glass path into member accounts.
-- **Account email:** every account needs a unique email address. Plus-addressing (`you+acme-security@gmail.com`) delivers to one inbox.
+- **Account email:** every account needs a unique email address. Plus-addressing (`you+acme-security@example.com`) delivers to your normal inbox but counts as a new address. Gmail and Outlook both support it.
 
 ---
 
 ## Steps
 
-1. **Create the organization.** Organizations console → *Create an organization*. All features are enabled by default.
-2. **Create the OUs** under Root: `Security`, `Workloads`, `Suspended`.
-3. **Create the security account.** *Add an AWS account* → *Create*:
-   - Name: `security`
-   - Email: `you+acme-security@gmail.com`
+Sign in as your admin user (`bootstrap-admin` from Phase 0). Check that the account ID in the top-right corner is your management account.
+
+1. **Create the organization:** search **AWS Organizations** → click **Create an organization**. All features are on by default, and you want them on. Nothing exists until you click this. AWS sends a verification email, but you don't need it to create accounts.
+2. **Create 3 OUs:** *AWS accounts* → tick **Root** → *Actions* → *Organizational unit* → **Create new**. Repeat for:
+   - `Security`
+   - `Workloads`
+   - `Suspended`
+3. **Create the security account:** *Add an AWS account* → **Create an AWS account**:
+   - Account name: `security`
+   - Email: `you+acme-security@example.com` (use your own address with a `+alias`)
    - IAM role name: leave the default `OrganizationAccountAccessRole`
-4. **Move it** into the **Security** OU.
+   
+   It shows as *Active* after a few minutes.
+4. **Move it:** tick `security` → *Actions* → **Move** → choose the `Security` OU.
+
+The management account stays at Root, outside every OU. That's on purpose.
+
+**Write down the security account ID.** Almost every later phase uses it as `<SECURITY_ID>`.
 
 ## Verify
 
 ```bash
 aws organizations describe-organization --query 'Organization.{Id:Id,FeatureSet:FeatureSet}'
+# want FeatureSet = ALL; the Id (o-…) is your <ORG_ID>
+
 aws organizations list-accounts --query 'Accounts[].[Name,Id,State]' --output table
-aws organizations list-organizational-units-for-parent --parent-id $(aws organizations list-roots --query 'Roots[0].Id' --output text) \
-  --query 'OrganizationalUnits[].Name'
+# want 2 ACTIVE accounts: management + security
+
+ROOT=$(aws organizations list-roots --query 'Roots[0].Id' --output text)
+aws organizations list-organizational-units-for-parent --parent-id $ROOT --query 'OrganizationalUnits[].[Name,Id]' --output table
+# want Security, Workloads, Suspended
+
+aws organizations list-parents --child-id <SECURITY_ID> --query 'Parents[0].Id' --output text
+# want the Security OU's id (ou-…), not the root (r-…)
 ```
 
 ---

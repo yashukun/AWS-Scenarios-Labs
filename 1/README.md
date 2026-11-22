@@ -248,7 +248,26 @@ Each control is enforced by a real mechanism, verified by a test, and linked to 
 - [ ] Root user **MFA**, no root access keys
 - [ ] AWS CLI v2 and Terraform ≥ 1.10
 - [ ] Organizations account quota **≥ 2**. That's the default, so no increase is needed.
-- [ ] A Gmail-style address that supports `+aliases`, for the second account's email (e.g. `you+acme-security@gmail.com`)
+- [ ] An email address that supports `+aliases` (Gmail and Outlook do), for the second account's email (e.g. `you+acme-security@example.com`)
+
+---
+
+## 🧭 Doing it by hand: five habits that save hours
+
+1. **Check the account ID and region in the top-right corner before every click.** Almost every error in this lab came from being in the wrong account (a KMS key in management) or the wrong region (GuardDuty in Ireland).
+2. **Root signs in once.** It does root MFA, the root-key check and billing access, then never again. Phase 0 creates a temporary IAM admin, and Phase 2 replaces that with SSO and deletes it.
+3. **Run CLI commands in your local terminal, not CloudShell.** CloudShell (prompt `~ $`) can't see your laptop's `~/.aws/config`, and after Phase 5 it can't open most regions either.
+4. **Copy only the command.** A leading `$` is the prompt, and `...` means "and so on". Typing either one gives confusing errors.
+5. **SSO sessions expire after 1 hour, on purpose.** When you see `Token has expired`, run `aws sso login --sso-session acme`.
+
+**IDs you'll reuse everywhere.** Write them down as soon as Phase 1 gives them to you:
+
+| Placeholder | Example | Where it comes from |
+|---|---|---|
+| `<MGMT_ID>` | `111111111111` | `aws sts get-caller-identity` in management |
+| `<SECURITY_ID>` | `222222222222` | `aws organizations list-accounts` |
+| `<ORG_ID>` | `o-abc123defg` | `aws organizations describe-organization` |
+| Portal URL | `https://d-xxxxxxxxxx.awsapps.com/start` | Identity Center → Dashboard |
 
 ---
 

@@ -21,7 +21,9 @@ Accounts created through Organizations **start without root credentials**. This 
 
 ## Steps
 
-1. Sign in to the **management account** (SSO admin) → IAM → **Root access management** → **Enable**. Tick both features.
+> **This deletes nothing.** Enabling the feature only gives the management account visibility and control over member accounts' root users. Your **management account's own root login isn't touched**, and you can turn the feature off again later. The `security` account was created by Organizations, so its root user never had a password, keys or MFA. There's nothing to delete.
+
+1. Sign in to the **management account** (SSO admin) → IAM → **Root access management** → **Enable**. Tick both features: ☑ *Root credentials management* and ☑ *Privileged root actions in member accounts*.
 2. In the **Accounts** table, check your member account. Root password, access keys and MFA should all read **Not present**.
 3. If something is present: select the account → **Take privileged action** → *Delete root user credentials*.
 
@@ -37,8 +39,9 @@ Accounts created through Organizations **start without root credentials**. This 
 ## Verify
 
 ```bash
-aws iam list-organizations-features
+aws iam list-organizations-features --profile acme-mgmt
 # EnabledFeatures: ["RootSessions", "RootCredentialsManagement"]
+# Not enabled yet → ServiceAccessNotEnabledException: "Trusted Access for IAM not enabled"
 ```
 
 ---

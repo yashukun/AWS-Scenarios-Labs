@@ -38,19 +38,65 @@ A **permission set** is a template. When you assign *group + permission set + ac
 
 ## Steps
 
-1. **Enable** IAM Identity Center in **us-east-1** (your home region). It creates an *organization instance*.
-2. **Enforce MFA (C1):** Settings → Authentication → *Multi-factor authentication* → Configure:
-   - Prompt users for MFA: **Every time they sign in**
-   - Users without a registered device: **Require them to register an MFA device at sign in**
-3. **Groups:** create the 4 groups above.
-4. **Users:** yourself (in `Platform-Admins`) and `payments-dev1` (in `Payments-Devs`, email `you+pdev1@gmail.com`).
-5. **Permission sets:** create `AdministratorAccess`, `SecurityAudit` and `Billing` from AWS managed policies. Set the session durations from the table.
-6. **Assignments:** AWS accounts → select an account → *Assign users or groups* → pick the group and permission set, following the table.
-7. **Test:** open the **AWS access portal URL** (Identity Center dashboard) and sign in as yourself. You'll be asked to register MFA.
+Do these in the **management account**, with the region set to **N. Virginia (us-east-1)**. Identity Center lives in one region only, and moving it later means starting over.
+
+### Part A: Turn it on
+1. Search **IAM Identity Center** → **Enable** → in the box *Enable IAM Identity Center with AWS Organizations*, click **Enable**. Don't pick "account instance".
+2. On the **Dashboard**, copy the **AWS access portal URL** (`https://d-xxxxxxxxxx.awsapps.com/start`). You'll need it in Parts F and G.
+
+### Part B: Require MFA (C1)
+Settings → **Authentication** tab → *Multi-factor authentication* → **Configure**:
+- Prompt users for MFA: ◉ **Every time they sign in (always-on)**
+- If a user has no MFA device: ◉ **Require them to register an MFA device at sign in**
+
+→ **Save changes**.
+
+### Part C: Groups
+Groups → **Create group**, 4 times: `Platform-Admins`, `Security-Team`, `Finance`, `Payments-Devs`. Don't add users yet.
+
+### Part D: Users
+Users → **Add user**. For the password, choose ◉ *Send an email to this user with password setup instructions*.
+
+| Username | Email | Group |
+|---|---|---|
+| `admin` (or your name) | `you@example.com` | Platform-Admins |
+| `payments-dev1` | `you+pdev1@example.com` | Payments-Devs |
+
+Each user gets an invitation email. Don't open them until Part G.
+
+### Part E: Permission sets
+Permission sets → **Create permission set**:
+
+| Name | Type | Policies | Session |
+|---|---|---|---|
+| `AdministratorAccess` | Predefined | AdministratorAccess | **1 hour** |
+| `Billing` | Predefined | Billing | 4 hours |
+| `SecurityAudit` | **Custom** (it needs two policies) | AWS managed: `SecurityAudit` **and** `ReadOnlyAccess` | 8 hours |
+
+> **Can't find `ReadOnlyAccess`?** Searching for it lists dozens of policies (`AmazonS3ReadOnlyAccess`, `AWSBillingReadOnlyAccess`…). You want the one named **just** `ReadOnlyAccess`, which is often on page 2 or 3. Ticks are kept when you search again, so check the counter shows **2 selected**. Don't pick `ViewOnlyAccess`, which is a different policy.
+
+### Part F: Assignments
+Every assignment follows the same pattern:
+> *AWS accounts* → tick the account(s) → **Assign users or groups** → *Groups* tab → tick the group → **Next** → tick the permission set → **Next** → **Submit**
+
+| Tick these accounts | Group | Permission set |
+|---|---|---|
+| management **and** security | Platform-Admins | AdministratorAccess |
+| management **and** security | Security-Team | SecurityAudit |
+| security only | Security-Team | AdministratorAccess |
+| management only | Finance | Billing |
+
+Assign **nothing** to `Payments-Devs`. That's on purpose.
+
+### Part G: Sign in as your SSO user
+1. Open a **private/incognito window**, so your current console session doesn't get in the way.
+2. Accept your user's invitation email → set a password → **register MFA** (authenticator app).
+3. The portal shows **both accounts**. Click *security* → *AdministratorAccess*. You're now in the security account on a temporary role.
+4. In another private window, do the same for `payments-dev1`. The portal shows **no accounts**: least privilege, working.
 
 ### Set up CLI access through SSO
 
-`aws configure sso` needs an interactive terminal. You can also write the profile directly into `~/.aws/config`:
+The CLI reads its settings from a text file **on your computer**: `~/.aws/config` (on a Mac that's `/Users/<you>/.aws/config`). Open it in your local terminal with `nano ~/.aws/config`, or with any text editor, and add the block below at the bottom. Replace the `d-xxxxxxxxxx` URL and the two account IDs:
 
 ```ini
 [sso-session acme]
@@ -70,19 +116,32 @@ sso_account_id = <SECURITY_ID>
 sso_role_name = AdministratorAccess
 region = us-east-1
 ```
+In nano: paste with ⌘V / Ctrl+Shift+V, save with **Ctrl+O** then **Enter**, and exit with **Ctrl+X**.
+
+Then log in. A browser opens: sign in as your **SSO user** (not the IAM user), enter the MFA code, and click **Allow access**.
 ```bash
-aws sso login --sso-session acme          # one login works for both profiles
-aws sts get-caller-identity --profile acme-security
+aws sso login --sso-session acme
+# → "Successfully logged into Start URL: https://d-…awsapps.com/start"
 ```
+From now on, add `--profile acme-mgmt` or `--profile acme-security` to every command.
+
+### Clean up the bootstrap user
+SSO now replaces it. IAM → Users → `bootstrap-admin` → **Delete**. Your management account now has **no IAM users**.
 
 ## Verify
 
 ```bash
-INST=$(aws sso-admin list-instances --query 'Instances[0].InstanceArn' --output text)
-aws sso-admin list-permission-sets --instance-arn $INST
-aws identitystore list-groups --identity-store-id $(aws sso-admin list-instances --query 'Instances[0].IdentityStoreId' --output text) \
-  --query 'Groups[].DisplayName'
+aws sts get-caller-identity --profile acme-mgmt
+aws sts get-caller-identity --profile acme-security
+# both ARNs contain assumed-role/AWSReservedSSO_AdministratorAccess_<hash>/<your-user>
+# the hash differs per account: each assignment is a real IAM role in that account
+
+INST=$(aws sso-admin list-instances --profile acme-mgmt --query 'Instances[0].InstanceArn' --output text)
+IDS=$(aws sso-admin list-instances --profile acme-mgmt --query 'Instances[0].IdentityStoreId' --output text)
+aws sso-admin list-permission-sets --instance-arn $INST --profile acme-mgmt          # 3 ARNs
+aws identitystore list-groups --identity-store-id $IDS --profile acme-mgmt --query 'Groups[].DisplayName'   # 4 groups
 ```
+In the console, also check Permission sets → `SecurityAudit` → *Permissions*: both managed policies are listed.
 
 ---
 
@@ -90,6 +149,15 @@ aws identitystore list-groups --identity-store-id $(aws sso-admin list-instances
 
 > [!NOTE]
 > **MFA settings have no read API.** You can't check C1 from the CLI. Check it in the console: Settings → Authentication.
+
+> [!WARNING]
+> **"The config profile (acme-mgmt) could not be found."** The command ran in **CloudShell**, whose prompt is `~ $`. CloudShell is a separate machine and never sees the `~/.aws/config` on your laptop. Run lab commands in your **local terminal**.
+
+> [!NOTE]
+> **"Token has expired and refresh failed."** Admin sessions last 1 hour, on purpose. Run `aws sso login --sso-session acme` again.
+
+> [!TIP]
+> **An extra, unused permission set** (e.g. `Security-Team-Permission-Set`) is left over from a first attempt. It's harmless, but delete it so the design table stays the truth.
 
 > [!TIP]
 > **One SSO session, many profiles.** Profiles that share an `sso_session` reuse a single login. That's why `acme-security` worked right after you logged in to a different profile in the same session.
